@@ -25,8 +25,15 @@ notifications already arrive in `ftmsbike::characteristicChanged`.
   |---|---|---|
   | LEFT up   | `0x0001` | target power **+10 W** |
   | LEFT down | `0x0002` | target power **−10 W** |
+  | LEFT 3rd  | `0x0004` | **gear down** (virtual shifting) |
   | RIGHT up  | `0x0008` | peloton offset **+1 s** |
   | RIGHT down| `0x0010` | peloton offset **−1 s** |
+  | RIGHT 3rd | `0x0020` | **gear up** (virtual shifting) |
+
+  Gears (`gearUp/gearDown`, `ftmsbike` is-a `bike`): a **no-op in erg/Peloton mode**; in **sim** mode
+  they add an inclination offset (harder/easier climb); with **`gears_zwift_ratio=true`** they send a
+  Zwift Play gear command (true Zwift virtual shifting). So test gears on a **sim/Zwift-style** ride,
+  and power/offset on a **Peloton PZ** ride.
 
   Routed through the existing dispatcher: `homeform::singleton()->keyboardPlus/Minus("target_power"|"peloton_offset")`.
   150 ms debounce (`lastSb20ButtonPress`). Gated by setting `sb20_buttons_enabled` (**default ON**).

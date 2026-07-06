@@ -724,8 +724,10 @@ void ftmsbike::characteristicChanged(const QLowEnergyCharacteristic &characteris
     // buttons as in-app controls. Payload is <type:u8> 00 <bitmask:u16 LE>; type 0x03 is the
     // per-press "commit" frame (the 0x01 held-stream / 0x04|0x08 terminators are ignored, which
     // debounces the burst to one action per press). The bitmask is one-hot per button:
-    // bit0 LEFT-up, bit1 LEFT-down, bit3 RIGHT-up, bit4 RIGHT-down (bits 2/5 = unmapped "3rd").
-    // Default mapping: LEFT up/down = target power +/-, RIGHT up/down = Peloton offset +/-.
+    // bit0 LEFT-up, bit1 LEFT-down, bit2 LEFT-3rd, bit3 RIGHT-up, bit4 RIGHT-down, bit5 RIGHT-3rd.
+    // Mapping: LEFT up/down = target power +/-, RIGHT up/down = Peloton offset +/- (erg-mode
+    // controls); LEFT/RIGHT 3rd = gear down/up (virtual shifting — an inclination offset in sim
+    // mode, or a Zwift Play gear command when gears_zwift_ratio is on; a no-op in erg mode).
     if (characteristic.uuid() == QBluetoothUuid(QStringLiteral("0c46be60-9c22-48ff-ae0e-c6eae1a2f4e5"))) {
         if (settings.value(QZSettings::sb20_buttons_enabled, QZSettings::default_sb20_buttons_enabled).toBool() &&
             newValue.length() >= 4 && ((uint8_t)newValue.at(0)) == 0x03 && homeform::singleton() &&
@@ -744,6 +746,12 @@ void ftmsbike::characteristicChanged(const QLowEnergyCharacteristic &characteris
                 break;
             case 0x0010: // RIGHT down -> peloton offset -
                 homeform::singleton()->keyboardMinus(QStringLiteral("peloton_offset"));
+                break;
+            case 0x0004: // LEFT 3rd -> gear down (virtual shifting)
+                gearDown();
+                break;
+            case 0x0020: // RIGHT 3rd -> gear up (virtual shifting)
+                gearUp();
                 break;
             default:
                 break;
