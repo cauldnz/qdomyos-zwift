@@ -2,6 +2,7 @@
 #include "devices/cscbike/cscbike.h"
 #include "speedracex_defaults.h"
 #include "homeform.h"
+#include "mywhooshlink.h"
 #include "virtualdevices/virtualbike.h"
 #include <QBluetoothLocalDevice>
 #include <QDateTime>
@@ -716,6 +717,48 @@ void ftmsbike::characteristicChanged(const QLowEnergyCharacteristic &characteris
                 if(homeform::singleton())
                     homeform::singleton()->setToastRequested(bluetoothDevice.name() + QStringLiteral(" Battery Level ") + QString::number(b) + " %");
             battery_level = b;
+        }
+        return;
+    }
+
+    // Stages SB20 handlebar shifter buttons (vendor characteristic 0c46be60). Payload:
+    // <type:u8> 00 <bitmask:u16 LE>; type 0x03 = per-press "commit" frame (150 ms debounce).
+    // bitmask one-hot: bit0 LEFT-up, bit1 LEFT-down, bit2 LEFT-3rd, bit3 RIGHT-up, bit4 RIGHT-down,
+    // bit5 RIGHT-3rd. We (a) drive qz internally and (b) when the OpenBikeControl / MyWhoosh bridge
+    // is enabled, rebroadcast the button so an SB20 rider gets their buttons in MyWhoosh (+ MQTT) too.
+    // Mapping is provisional (will become user-configurable — see #4785).
+    if (characteristic.uuid() == QBluetoothUuid(QStringLiteral("0c46be60-9c22-48ff-ae0e-c6eae1a2f4e5"))) {
+        if (newValue.length() >= 4 && ((uint8_t)newValue.at(0)) == 0x03 &&
+            (!lastSb20ButtonPress.isValid() || lastSb20ButtonPress.msecsTo(now) >= 150)) {
+            lastSb20ButtonPress = now;
+            const uint16_t buttonMask = ((uint8_t)newValue.at(2)) | (((uint16_t)((uint8_t)newValue.at(3))) << 8);
+
+            // (a) drive qz internally: paddles = target power / peloton offset, 3rd buttons = gears
+            if (homeform::singleton()) {
+                switch (buttonMask) {
+                case 0x0001: homeform::singleton()->keyboardPlus(QStringLiteral("target_power")); break;   // LEFT up
+                case 0x0002: homeform::singleton()->keyboardMinus(QStringLiteral("target_power")); break;  // LEFT down
+                case 0x0008: homeform::singleton()->keyboardPlus(QStringLiteral("peloton_offset")); break;  // RIGHT up
+                case 0x0010: homeform::singleton()->keyboardMinus(QStringLiteral("peloton_offset")); break; // RIGHT down
+                case 0x0004: gearDown(); break;  // LEFT 3rd -> gear down
+                case 0x0020: gearUp();   break;  // RIGHT 3rd -> gear up
+                default: break;
+                }
+            }
+
+            // (b) rebroadcast out via OpenBikeControl when the MyWhoosh bridge is on (momentary click)
+            MyWhooshLink *obc = MyWhooshLink::instance();
+            if (obc && obc->isEnabled()) {
+                switch (buttonMask) {
+                case 0x0001: obc->handleLeftUp(true);   obc->handleLeftUp(false);   break;
+                case 0x0002: obc->handleLeftDown(true); obc->handleLeftDown(false); break;
+                case 0x0008: obc->handleRightY(true);   obc->handleRightY(false);   break;
+                case 0x0010: obc->handleRightA(true);   obc->handleRightA(false);   break;
+                case 0x0004: obc->handleGearDown(true); obc->handleGearDown(false); break;
+                case 0x0020: obc->handleGearUp(true);   obc->handleGearUp(false);   break;
+                default: break;
+                }
+            }
         }
         return;
     }

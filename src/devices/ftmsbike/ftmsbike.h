@@ -139,6 +139,7 @@ class ftmsbike : public bike {
     QDateTime lastRefreshCharacteristicChanged2ACE = QDateTime::currentDateTime();
     QDateTime lastDomyosResistanceCommand = QDateTime::currentDateTime().addSecs(-60);
     QDateTime domyosResistanceRetryAfter = QDateTime::currentDateTime().addSecs(-60);
+    QDateTime lastSb20ButtonPress; // debounce for the Stages SB20 handlebar shifter buttons
     bool ftmsFrameReceived = false;
     uint8_t firstStateChanged = 0;
     int8_t bikeResistanceOffset = 4;
