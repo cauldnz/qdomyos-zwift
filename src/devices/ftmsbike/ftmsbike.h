@@ -115,6 +115,7 @@ class ftmsbike : public bike {
     void init();
     void forceResistance(resistance_t requestResistance);
     void forcePower(int16_t requestPower);
+    void sb20DoAction(const QString &action); // dispatch a Stages SB20 button's configured qz action
     void forceInclination(double requestInclination);
     void sendZwiftPlayInclination(double inclination);
     uint16_t wattsFromResistance(double resistance);

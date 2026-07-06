@@ -332,6 +332,21 @@ class QZSettings {
     static const QString heart_rate_belt_name;
     static const QString default_heart_rate_belt_name;
 
+    // Stages SB20 handlebar button -> action bindings (provisional; see qz #4785).
+    // Tokens: power_up/down, offset_up/down, gear_up/down, resistance_up/down, zone_up/down, lap, start_stop, none
+    static const QString sb20_button_left_up;
+    static const QString default_sb20_button_left_up;
+    static const QString sb20_button_left_down;
+    static const QString default_sb20_button_left_down;
+    static const QString sb20_button_left_3rd;
+    static const QString default_sb20_button_left_3rd;
+    static const QString sb20_button_right_up;
+    static const QString default_sb20_button_right_up;
+    static const QString sb20_button_right_down;
+    static const QString default_sb20_button_right_down;
+    static const QString sb20_button_right_3rd;
+    static const QString default_sb20_button_right_3rd;
+
     /**
      *@brief Used to ignore the heart rate from some devices.
      */

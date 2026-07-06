@@ -1,86 +1,82 @@
-# SB20 handlebar-buttons — bench-test run-sheet (feat/sb20-buttons)
+# SB20 handlebar-buttons — bench-test run-sheet (feat/sb20-obc, built on #4504)
 
-Goal: build this branch on Linux, connect to a **real Stages SB20**, and verify the SB20's
-handlebar buttons control the app. This is a **human + AI** job — the AI builds/observes/fixes,
-the human presses the physical buttons and pedals. Tracks upstream issue
-[cagnulein/qdomyos-zwift#4785](https://github.com/cagnulein/qdomyos-zwift/issues/4785).
+Goal: build this branch on Linux, connect to a **real Stages SB20**, and verify the SB20's handlebar
+buttons **(A) control qz internally** and **(B) rebroadcast out via OpenBikeControl to MyWhoosh**. Human +
+AI: the AI builds/observes/fixes; the human presses the physical buttons and pedals. Tracks
+[cagnulein/qdomyos-zwift#4785](https://github.com/cagnulein/qdomyos-zwift/issues/4785) and #4608.
 
-> These two files (`build-linux-desktop.sh`, `SB20-BENCH.md`) are **fork-only bench aids** — strip
-> them from the eventual upstream PR (the PR is just the `ftmsbike` + `qzsettings` code change).
+> This branch is **#4504 (`codex/replace-mywhoosh-link-protocol`) + our SB20 changes**. `SB20-BENCH.md`,
+> `build-linux-desktop.sh`, and `.github/workflows/ci-linux-desktop.yml` are fork-only bench aids.
 
 ## What the feature does
 
-The SB20 exposes its 6 handlebar buttons on a BLE **vendor characteristic**
-`0c46be60-9c22-48ff-ae0e-c6eae1a2f4e5` (under vendor service `0c46be5f-…`). qz already binds the
-SB20 to the **`ftmsbike`** driver and auto-subscribes every Notify characteristic, so those button
-notifications already arrive in `ftmsbike::characteristicChanged`.
+The SB20 exposes its 6 handlebar buttons on BLE vendor char `0c46be60-9c22-48ff-ae0e-c6eae1a2f4e5`.
+`ftmsbike::characteristicChanged` decodes the `0x03` commit frame (150 ms debounce; bitmask one-hot:
+bit0 L-up, bit1 L-down, bit2 L-3rd, bit3 R-up, bit4 R-down, bit5 R-3rd) and:
 
-- **Payload:** `<type:u8> 00 <bitmask:u16 LE>`. The per-press **commit** frame is `type = 0x03`.
-  (The `0x01` frames stream while a button is *held*; `0x04`/`0x08` are burst terminators.)
-- **Bitmask (one-hot, which button):** bit0 LEFT-up, bit1 LEFT-down, bit2 LEFT-3rd,
-  bit3 RIGHT-up, bit4 RIGHT-down, bit5 RIGHT-3rd.
-- **Default mapping** (`src/devices/ftmsbike/ftmsbike.cpp`, search `0c46be60`):
+- **(A) drives qz internally** via each button's **configurable** action (`sb20DoAction`).
+- **(B) rebroadcasts out via OpenBikeControl** through `MyWhooshLink` (`handleLeftUp/Down`,
+  `handleRightY/A`, `handleGearUp/Down`) **when the MyWhoosh/OBC bridge is enabled** — so the SB20 buttons
+  become usable in MyWhoosh (+ MQTT). The #4608 fix, for Stages bikes.
 
-  | Button | bitmask | Action |
-  |---|---|---|
-  | LEFT up   | `0x0001` | target power **+10 W** |
-  | LEFT down | `0x0002` | target power **−10 W** |
-  | LEFT 3rd  | `0x0004` | **gear down** (virtual shifting) |
-  | RIGHT up  | `0x0008` | peloton offset **+1 s** |
-  | RIGHT down| `0x0010` | peloton offset **−1 s** |
-  | RIGHT 3rd | `0x0020` | **gear up** (virtual shifting) |
+**Default internal mapping** (each button is rebindable — see Config):
 
-  Gears (`gearUp/gearDown`, `ftmsbike` is-a `bike`): a **no-op in erg/Peloton mode**; in **sim** mode
-  they add an inclination offset (harder/easier climb); with **`gears_zwift_ratio=true`** they send a
-  Zwift Play gear command (true Zwift virtual shifting). So test gears on a **sim/Zwift-style** ride,
-  and power/offset on a **Peloton PZ** ride.
+| Button | bitmask | Default action | Setting key |
+|---|---|---|---|
+| LEFT up   | `0x0001` | `power_up`   (target power +10 W) | `sb20_button_left_up` |
+| LEFT down | `0x0002` | `power_down` (target power −10 W) | `sb20_button_left_down` |
+| LEFT 3rd  | `0x0004` | `gear_down` (virtual shifting)    | `sb20_button_left_3rd` |
+| RIGHT up  | `0x0008` | `offset_up`   (peloton offset +1 s) | `sb20_button_right_up` |
+| RIGHT down| `0x0010` | `offset_down` (peloton offset −1 s) | `sb20_button_right_down` |
+| RIGHT 3rd | `0x0020` | `gear_up` (virtual shifting)       | `sb20_button_right_3rd` |
 
-  Routed through the existing dispatcher: `homeform::singleton()->keyboardPlus/Minus("target_power"|"peloton_offset")`.
-  150 ms debounce (`lastSb20ButtonPress`). Gated by setting `sb20_buttons_enabled` (**default ON**).
+Action tokens: `power_up/down`, `offset_up/down`, `gear_up/down`, `resistance_up/down`, `zone_up/down`,
+`lap`, `start_stop`, `none`. (Gears are a no-op in erg mode; an inclination offset in sim; a Zwift Play
+gear command when `gears_zwift_ratio=true`.)
 
 ## 1 · Build
 
 ```bash
 bash build-linux-desktop.sh      # apt deps + submodules + qthttpserver + qmake/make (~15 min)
 ```
-If `qmake` errors on a missing Qt module, `apt install` the matching `-dev` / `qml-module-*` and retry.
+If it fails with `bad interpreter: …^M`, run `sed -i 's/\r$//' build-linux-desktop.sh` first.
+Then run capturing logs: `./src/qdomyos-zwift 2>&1 | tee /tmp/qz.log`.
 
-## 2 · Bring up BLE + pair
+## 2 · Test A — internal control (qz)
 
-- `bluetoothctl list` → a controller must appear. If not, the USB BT dongle needs re-passing-through
-  to the VM (tell the human).
-- Run with debug capture: `./src/qdomyos-zwift 2>&1 | tee /tmp/qz.log`
-  (enable **Settings → debug log** in qz if the console is quiet).
-- Human confirms the SB20 (`Stages Bike ####`) connects as an **FTMS bike** and power/cadence stream.
+- Confirm `bluetoothctl list` shows a controller; launch qz; the SB20 (`Stages Bike ####`) connects as an
+  **FTMS bike**; power/cadence stream. First run: set **Peloton login + FTP**.
+- Human pedals + presses each button; AI watches `grep -i 0c46be60 /tmp/qz.log` for `… << 03 00 <bit> <bit>`.
+- Confirm: LEFT up/down → **target power ±10 W** (T.Power tile + felt resistance); RIGHT up/down →
+  **peloton offset ±1 s** (start a Peloton Power-Zone workout first); 3rd buttons → **gears** (best seen on
+  a sim/Zwift-style ride).
 
-## 3 · Verify the buttons
+## 3 · Test B — OpenBikeControl rebroadcast → MyWhoosh
 
-Ask the human to pedal, then press each button while you watch `/tmp/qz.log`:
+- In qz **experimental settings**, enable the **MyWhoosh/OpenBikeControl link** (and, per #4608, you may
+  need to disable the `dircon` setting so OBC is used for MyWhoosh).
+- Run **MyWhoosh** on the PC (same LAN). It should discover the qz OBC bridge (mDNS
+  `_openbikecontrol._tcp.local.`, port 21587).
+- Human presses SB20 buttons; confirm they reach MyWhoosh (the shifter/3rd buttons drive
+  `handleGearUp/Down` → MyWhoosh virtual shifting; paddles → `handleLeftUp/Down` / `handleRightY/A`).
+  Cross-check qz's log / MQTT for the emitted button events.
 
-```bash
-grep --line-buffered -i '0c46be60' /tmp/qz.log        # shifter notifications
-```
-- Each press should show a `… 0c46be60 … << 03 00 <bit> <bit>` line (plus a run of `01 00 <bit>`).
-- **LEFT up/down** → the app's `T.Power` tile changes ±10 W and resistance steps (human confirms feel).
-- **RIGHT up/down** → the `peloton_offset` moves ±1 s — start a **Peloton Power Zone** workout first.
+## 4 · Config — rebind a button
 
-Record, per button: the exact log bytes, whether the action fired, and what the human saw/felt.
+Each button reads a QSettings key (see table). To remap, set e.g. `sb20_button_left_3rd = lap`. On
+Linux qz stores settings under `~/.config/` (org "Roberto Viola" / app "QDomyos-Zwift") —
+`qz's Settings UI` doesn't expose these yet (provisional; the maintainer will decide the final UI, #4785).
 
-## 4 · If something's off — you may edit the branch, rebuild, and (with human OK) push
+## 5 · If something's off (edit branch, rebuild, push)
 
-- **Only `01` frames, no `03`:** switch the trigger to debounce the `01` held-stream instead of keying
-  on `0x03` — collapse a run of identical `01 00 <bit>` into one action (reuse the 150 ms
-  `lastSb20ButtonPress` guard). Edit the `characteristicChanged` block in `ftmsbike.cpp`.
-- **Wrong control / backwards offset:** adjust the `switch (buttonMask)` cases (swap
-  `keyboardPlus`↔`keyboardMinus`, or remap bits).
-- **Nothing on `0c46be60` at all:** confirm the vendor service is discovered — grep the log for
-  `0c46be5f` / `char uuid`. If qz never subscribes it, check the notify-subscription loop in
-  `ftmsbike::stateChanged`.
-- After any change: `qmake && make -j"$(nproc)"` and re-test. To push: `git push origin feat/sb20-buttons`
-  (triggers the fork's hosted CI). Keep a terse changelog of what you changed and why.
+- **Only `01` frames, no `03`:** switch the trigger to debounce the `01` held-stream instead of `0x03`.
+- **MyWhoosh double-shifts / misses a press:** the OBC rebroadcast sends a momentary click
+  (`handle*(true)` then `handle*(false)`) — adjust in the `(b)` block of `characteristicChanged`.
+- **Wrong button→OBC mapping:** edit the `(b)` switch (`handleGearUp/Down`, `handleLeftUp/Down`,
+  `handleRightY/A`).
+- Rebuild `qmake && make -j"$(nproc)"`, re-test; push to `feat/sb20-obc` (triggers the fork CI).
 
 ## Boundaries
-
-- Coordinate with the human for anything physical (button presses, pedalling, felt resistance).
-- Stay on **this fork's `feat/sb20-buttons`** branch — don't touch other branches or upstream.
-- The full Peloton **ride** test is the human's, after this bench check passes.
+- Coordinate with the human for anything physical (button presses, pedalling, felt resistance, MyWhoosh).
+- Stay on **`feat/sb20-obc`** — don't touch other branches or upstream.
+- The full Peloton **ride** test is the human's, after the bench check passes.

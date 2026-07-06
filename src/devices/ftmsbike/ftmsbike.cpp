@@ -670,6 +670,37 @@ bool ftmsbike::shouldUseCalculatedResistanceFallback(const QDateTime &now) {
     return calculatedResistanceFallbackSince.msecsTo(now) >= 3000;
 }
 
+// Dispatch a Stages SB20 handlebar button press to its configured qz action (see #4785). Tokens:
+// power_up/down, offset_up/down, gear_up/down, resistance_up/down, zone_up/down, lap, start_stop, none.
+void ftmsbike::sb20DoAction(const QString &action) {
+    if (action.isEmpty() || action == QStringLiteral("none"))
+        return;
+    if (action == QStringLiteral("gear_up")) { gearUp(); return; }
+    if (action == QStringLiteral("gear_down")) { gearDown(); return; }
+    if (!homeform::singleton())
+        return;
+    if (action == QStringLiteral("power_up"))
+        homeform::singleton()->keyboardPlus(QStringLiteral("target_power"));
+    else if (action == QStringLiteral("power_down"))
+        homeform::singleton()->keyboardMinus(QStringLiteral("target_power"));
+    else if (action == QStringLiteral("offset_up"))
+        homeform::singleton()->keyboardPlus(QStringLiteral("peloton_offset"));
+    else if (action == QStringLiteral("offset_down"))
+        homeform::singleton()->keyboardMinus(QStringLiteral("peloton_offset"));
+    else if (action == QStringLiteral("resistance_up"))
+        homeform::singleton()->keyboardPlus(QStringLiteral("resistance"));
+    else if (action == QStringLiteral("resistance_down"))
+        homeform::singleton()->keyboardMinus(QStringLiteral("resistance"));
+    else if (action == QStringLiteral("zone_up"))
+        homeform::singleton()->keyboardPlus(QStringLiteral("target_zone"));
+    else if (action == QStringLiteral("zone_down"))
+        homeform::singleton()->keyboardMinus(QStringLiteral("target_zone"));
+    else if (action == QStringLiteral("lap"))
+        homeform::singleton()->keyboardLap();
+    else if (action == QStringLiteral("start_stop"))
+        homeform::singleton()->keyboardStartStop();
+}
+
 void ftmsbike::characteristicChanged(const QLowEnergyCharacteristic &characteristic, const QByteArray &newValue) {
     if (isWriting && currentWriteWaitingForResponse && sender() == currentWriteService) {
         completeCurrentWrite();
@@ -733,18 +764,19 @@ void ftmsbike::characteristicChanged(const QLowEnergyCharacteristic &characteris
             lastSb20ButtonPress = now;
             const uint16_t buttonMask = ((uint8_t)newValue.at(2)) | (((uint16_t)((uint8_t)newValue.at(3))) << 8);
 
-            // (a) drive qz internally: paddles = target power / peloton offset, 3rd buttons = gears
-            if (homeform::singleton()) {
-                switch (buttonMask) {
-                case 0x0001: homeform::singleton()->keyboardPlus(QStringLiteral("target_power")); break;   // LEFT up
-                case 0x0002: homeform::singleton()->keyboardMinus(QStringLiteral("target_power")); break;  // LEFT down
-                case 0x0008: homeform::singleton()->keyboardPlus(QStringLiteral("peloton_offset")); break;  // RIGHT up
-                case 0x0010: homeform::singleton()->keyboardMinus(QStringLiteral("peloton_offset")); break; // RIGHT down
-                case 0x0004: gearDown(); break;  // LEFT 3rd -> gear down
-                case 0x0020: gearUp();   break;  // RIGHT 3rd -> gear up
-                default: break;
-                }
+            // (a) drive qz internally via each button's configured action (defaults: paddles =
+            //     target power / peloton offset, 3rd buttons = gears).
+            QString sb20Action;
+            switch (buttonMask) {
+            case 0x0001: sb20Action = settings.value(QZSettings::sb20_button_left_up,    QZSettings::default_sb20_button_left_up).toString();    break;
+            case 0x0002: sb20Action = settings.value(QZSettings::sb20_button_left_down,  QZSettings::default_sb20_button_left_down).toString();  break;
+            case 0x0004: sb20Action = settings.value(QZSettings::sb20_button_left_3rd,   QZSettings::default_sb20_button_left_3rd).toString();   break;
+            case 0x0008: sb20Action = settings.value(QZSettings::sb20_button_right_up,   QZSettings::default_sb20_button_right_up).toString();   break;
+            case 0x0010: sb20Action = settings.value(QZSettings::sb20_button_right_down, QZSettings::default_sb20_button_right_down).toString(); break;
+            case 0x0020: sb20Action = settings.value(QZSettings::sb20_button_right_3rd,  QZSettings::default_sb20_button_right_3rd).toString();  break;
+            default: break;
             }
+            sb20DoAction(sb20Action);
 
             // (b) rebroadcast out via OpenBikeControl when the MyWhoosh bridge is on (momentary click)
             MyWhooshLink *obc = MyWhooshLink::instance();
