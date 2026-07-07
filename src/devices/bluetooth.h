@@ -159,6 +159,7 @@
 
 #include "zwift_play/zwiftPlayDevice.h"
 #include "zwift_play/zwiftclickremote.h"
+#include "devices/obclistener/obclistener.h"
 #include "devices/cycplusbc2controller/cycplusbc2controller.h"
 #include "devices/thinkridercontroller/thinkridercontroller.h"
 
@@ -318,6 +319,7 @@ class bluetooth : public QObject, public SignalHandler {
     QList<eliteariafan *> eliteAriaFan;
     QList<zwiftclickremote* > zwiftPlayDevice;
     zwiftclickremote* zwiftClickRemote = nullptr;
+    obclistener* obcListener = nullptr;
     cycplusbc2controller* cycplusBC2Controller = nullptr;
     thinkridercontroller* thinkriderController = nullptr;
     sramaxscontroller* sramAXSController = nullptr;
