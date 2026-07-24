@@ -1607,6 +1607,7 @@ import AndroidStatusBar 1.0
             property bool tile_grade_adjusted_pace_enabled: false
             property int tile_grade_adjusted_pace_order: 79
             property bool cycplus_bc2_controller: false
+            property bool obc_listener_enabled: false
       		property bool lifespan_bike: false
 
             property double power_sensor_speed_inclination_coeff_a: 0.0
@@ -14675,6 +14676,43 @@ import AndroidStatusBar 1.0
 
                             Label {
                                 text: qsTr("CYCPLUS BC2 virtual shifter. Use it to change gears on QZ!")
+                                font.bold: true
+                                font.italic: true
+                                font.pixelSize: Qt.application.font.pixelSize - 2
+                                textFormat: Text.PlainText
+                                wrapMode: Text.WordWrap
+                                verticalAlignment: Text.AlignVCenter
+                                Layout.alignment: Qt.AlignLeft | Qt.AlignTop
+                                Layout.fillWidth: true
+                                color: Material.color(Material.Lime)
+                            }
+                        }
+                    }
+
+                AccordionElement {
+                        title: qsTr("OpenBikeControl Options")
+                        indicatRectColor: Material.color(Material.Grey)
+                        textColor: Material.color(Material.Yellow)
+                        color: Material.backgroundColor
+
+                        accordionContent: ColumnLayout {
+                            spacing: 0
+                            IndicatorOnlySwitch {
+                                text: qsTr("OBC Controller")
+                                spacing: 0
+                                bottomPadding: 0
+                                topPadding: 0
+                                rightPadding: 0
+                                leftPadding: 0
+                                clip: false
+                                checked: settings.obc_listener_enabled
+                                Layout.alignment: Qt.AlignLeft | Qt.AlignTop
+                                Layout.fillWidth: true
+                                onClicked: { settings.obc_listener_enabled = checked; window.settings_restart_to_apply = true; }
+                            }
+
+                            Label {
+                                text: qsTr("OpenBikeControl button controller. Use its buttons to change gears, ERG target and more on QZ!")
                                 font.bold: true
                                 font.italic: true
                                 font.pixelSize: Qt.application.font.pixelSize - 2

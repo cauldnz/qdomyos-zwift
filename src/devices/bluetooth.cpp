@@ -3413,6 +3413,24 @@ void bluetooth::connectedAndDiscovered() {
         }
     }
 
+    // OpenBikeControl (OBC) listener — qz as a BLE central to an OBC button controller. Matches on the
+    // advertised OBC service UUID only (no name prefix: "OBC" would be too broad a match), connects, and
+    // maps Button-State notifications to qz actions (see obclistener). One controller for now; bike-only.
+    if (settings.value(QZSettings::obc_listener_enabled, QZSettings::default_obc_listener_enabled).toBool() &&
+        this->device() && this->device()->deviceType() == BIKE && !obcListener) {
+        const QBluetoothUuid obcSvc(obclistener::OBC_SERVICE_UUID);
+        for (const QBluetoothDeviceInfo &b : qAsConst(devices)) {
+            if (!b.serviceUuids().contains(obcSvc))
+                continue;
+            obcListener = new obclistener(this);
+            connect(obcListener, &obclistener::debug, this, &bluetooth::debug);
+            obcListener->deviceDiscovered(b);
+            if (homeform::singleton())
+                homeform::singleton()->setToastRequested("OBC Controller Connected!");
+            break;
+        }
+    }
+
     if(settings.value(QZSettings::thinkrider_controller, QZSettings::default_thinkrider_controller).toBool()) {
         for (const QBluetoothDeviceInfo &b : qAsConst(devices)) {
             if (((b.name().toUpper().startsWith("THINK VS")) || (b.name().toUpper().startsWith("THINKRIDER"))) && !thinkriderController && this->device() &&
