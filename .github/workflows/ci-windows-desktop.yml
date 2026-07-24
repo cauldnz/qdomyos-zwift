@@ -1,0 +1,136 @@
+# Fork-only: build JUST the Windows (MinGW) qz desktop binary, to (a) verify obclistener
+# compiles on Windows and (b) produce a runnable windows-binary-no-python.zip for the on-air
+# OBC-listener test. Extracted verbatim from main.yml's `window-build` job, matrix trimmed to
+# {python: false} (no paddleocr). NOT for upstream — drop before any upstream PR.
+name: CI Windows Desktop (fork)
+
+env:
+  DISPLAY: ':99'
+  ACTIONS_ALLOW_UNSECURE_COMMANDS: 'true'
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "ci-win/**" ]
+
+concurrency:
+  group: ci-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  window-build:
+    runs-on: windows-2022
+    strategy:
+      matrix:
+        config:
+          - {python: false}
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout submodule repo
+        uses: actions/checkout@v4
+        with:
+          repository: bluetiger9/SmtpClient-for-Qt
+          path: "src/smtpclient/"
+          ref: 3fa4a0fe5797070339422cf18b5e9ed8dcb91f9c
+      - name: Checkout googletest
+        uses: actions/checkout@v4
+        with:
+          repository: google/googletest
+          path: "tst/googletest/"
+          ref: "release-1.12.1"
+      - name: Checkout MSIX-Toolkit
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/MSIX-Toolkit
+          path: "src/MSIX-Toolkit/"
+          ref: b82af826d29e93e4c85d34fad8a405b6c49905e7
+      - name: Checkout qHttpServer
+        uses: actions/checkout@v4
+        with:
+          repository: qt-labs/qthttpserver
+          path: "src/qthttpserver"
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          install: mingw-w64-x86_64-toolchain mingw-w64-x86_64-qt5-webview
+          msystem: mingw64
+          release: false
+
+      - name: Setup cmake
+        uses: jwlawson/actions-setup-cmake@v1.9
+        with:
+          cmake-version: '3.20.x'
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '5.15.2'
+          host: 'windows'
+          modules: 'qtnetworkauth qtcharts'
+          target: "desktop"
+          arch: win64_mingw81
+          dir: "${{github.workspace}}/qt/"
+          install-deps: "true"
+          cache: 'true'
+          cache-key-prefix: 'install-qt-action-windows'
+
+      - name: Cache qthttpserver build
+        id: cache-qthttpserver-mingw
+        uses: actions/cache@v4
+        with:
+          path: src/qthttpserver
+          key: qthttpserver-mingw-${{ runner.os }}-qt5.15.2-v1
+
+      - name: download 3rd party files for qthttpserver
+        if: steps.cache-qthttpserver-mingw.outputs.cache-hit != 'true'
+        run: |
+            cp qHttpServerBin/5.15.2/headers/* src/qthttpserver/src/3rdparty/http-parser/
+
+      - name: Build qthttpserver
+        if: steps.cache-qthttpserver-mingw.outputs.cache-hit != 'true'
+        run: |
+            cd src\qthttpserver
+            qmake
+            make -j8
+            cd ../..
+
+      - name: Install qthttpserver
+        run: |
+            cd src\qthttpserver
+            make install
+            cd ../..
+
+      - name: Build without python
+        run: |
+            lrelease src/qdomyos-zwift.pri
+            qmake
+            make -j8
+            cd src/debug
+            mkdir output
+            mkdir appx
+            cp qdomyos-zwift.* output/
+            cd output
+            windeployqt --qmldir ../../ qdomyos-zwift.exe
+            cp "C:/mingw64/bin/libwinpthread-1.dll" .
+            cp "C:/mingw64/bin/libgcc_s_seh-1.dll" .
+            cp "C:/mingw64/bin/libstdc++-6.dll" .
+            cp ../../../icons/iOS/iTunesArtwork@2x.png .
+            cp ../../AppxManifest.xml .
+            cp ../../../windows_openssl/*.* .
+            mkdir adb
+            cp ../../adb/* adb/
+            cd ..
+            cd appx
+
+      - name: patching qt for bluetooth
+        run: cp qt-patches/windows/5.15.2/binary/mingw64/*.* ${{ github.workspace }}/src/debug/output/
+
+      - name: Zip artifact for deployment
+        run: Compress-Archive src/debug/output windows-binary-no-python.zip
+
+      - name: Archive windows binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binary-no-python
+          path: windows-binary-no-python.zip
