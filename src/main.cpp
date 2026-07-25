@@ -129,6 +129,7 @@ double bikeResistanceGain = 1.0;
 QString power_sensor_name = QStringLiteral("Disabled");
 bool power_sensor_as_treadmill = false;
 bool smokeTest = false;
+bool allowNonRoot = false; // BENCH-ONLY: see -allow-nonroot in the arg parser
 QString logfilename = QStringLiteral("debug-") +
                       QDateTime::currentDateTime()
                           .toString()
@@ -198,6 +199,8 @@ void displayHelp() {
     printf("  -test-hfb                     Enable Home Fitness Buddy test mode\n");
     printf("  -test-pzp                     Enable Power Zone Pack test mode\n");
     printf("  -smoke-test                   Run smoke test (verify Qt loads, print SMOKE_OK, exit)\n");
+    printf("  -allow-nonroot                BENCH ONLY: run unprivileged (BLE central works; "
+           "virtual-device/peripheral features may not)\n");
     printf("  -train <program>              Specify training program\n");
 
     printf("\nPeloton options:\n");
@@ -366,6 +369,14 @@ QCoreApplication *createApplication(int &argc, char *argv[]) {
             smokeTest = true;
             nogui = true;
         }
+        // BENCH-ONLY (fork bench branch, not for upstream): skip the blanket root gate below.
+        // BLE *central* — all the OBC listener and SB20 shifter paths need — works unprivileged
+        // through BlueZ's D-Bus API, so root is unnecessary for bench-testing those. Running as
+        // the normal user also keeps QSettings in the user's ~/.config instead of /root/.config.
+        // Do NOT use this for a real ride: the virtual-device (BLE peripheral) paths that feed
+        // Zwift/FTMS may still require elevation.
+        if (!qstrcmp(argv[i], "-allow-nonroot"))
+            allowNonRoot = true;
         if (!qstrcmp(argv[i], "-train")) {
 
             trainProgram = argv[++i];
@@ -576,11 +587,15 @@ int main(int argc, char *argv[]) {
 
 #ifdef Q_OS_LINUX
 #ifndef Q_OS_ANDROID
-    if (getuid() && !testPeloton && !testHomeFitnessBudy && !testPowerZonePack && !smokeTest) {
+    if (getuid() && !testPeloton && !testHomeFitnessBudy && !testPowerZonePack && !smokeTest &&
+        !allowNonRoot) {
 
         printf("Runme as root!\n");
         return -1;
-    } else
+    } else if (getuid() && allowNonRoot)
+        printf("%s", "Running unprivileged (-allow-nonroot): BLE central only; virtual-device "
+                     "(peripheral) features may not work.\n");
+    else
         printf("%s", "OK, you are root.\n");
 #endif
 #endif
