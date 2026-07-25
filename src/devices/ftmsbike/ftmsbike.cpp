@@ -720,6 +720,46 @@ void ftmsbike::characteristicChanged(const QLowEnergyCharacteristic &characteris
         return;
     }
 
+    // Stages SB20 handlebar shifter buttons (vendor characteristic 0c46be60): surface the spare
+    // buttons as in-app controls. Payload is <type:u8> 00 <bitmask:u16 LE>; type 0x03 is the
+    // per-press "commit" frame (the 0x01 held-stream / 0x04|0x08 terminators are ignored, which
+    // debounces the burst to one action per press). The bitmask is one-hot per button:
+    // bit0 LEFT-up, bit1 LEFT-down, bit2 LEFT-3rd, bit3 RIGHT-up, bit4 RIGHT-down, bit5 RIGHT-3rd.
+    // Mapping: LEFT up/down = target power +/-, RIGHT up/down = Peloton offset +/- (erg-mode
+    // controls); LEFT/RIGHT 3rd = gear down/up (virtual shifting — an inclination offset in sim
+    // mode, or a Zwift Play gear command when gears_zwift_ratio is on; a no-op in erg mode).
+    if (characteristic.uuid() == QBluetoothUuid(QStringLiteral("0c46be60-9c22-48ff-ae0e-c6eae1a2f4e5"))) {
+        if (settings.value(QZSettings::sb20_buttons_enabled, QZSettings::default_sb20_buttons_enabled).toBool() &&
+            newValue.length() >= 4 && ((uint8_t)newValue.at(0)) == 0x03 && homeform::singleton() &&
+            (!lastSb20ButtonPress.isValid() || lastSb20ButtonPress.msecsTo(now) >= 150)) {
+            lastSb20ButtonPress = now;
+            uint16_t buttonMask = ((uint8_t)newValue.at(2)) | (((uint16_t)((uint8_t)newValue.at(3))) << 8);
+            switch (buttonMask) {
+            case 0x0001: // LEFT up -> target power +
+                homeform::singleton()->keyboardPlus(QStringLiteral("target_power"));
+                break;
+            case 0x0002: // LEFT down -> target power -
+                homeform::singleton()->keyboardMinus(QStringLiteral("target_power"));
+                break;
+            case 0x0008: // RIGHT up -> peloton offset +
+                homeform::singleton()->keyboardPlus(QStringLiteral("peloton_offset"));
+                break;
+            case 0x0010: // RIGHT down -> peloton offset -
+                homeform::singleton()->keyboardMinus(QStringLiteral("peloton_offset"));
+                break;
+            case 0x0004: // LEFT 3rd -> gear down (virtual shifting)
+                gearDown();
+                break;
+            case 0x0020: // RIGHT 3rd -> gear up (virtual shifting)
+                gearUp();
+                break;
+            default:
+                break;
+            }
+        }
+        return;
+    }
+
     if (characteristic.uuid() == QBluetoothUuid((quint16)0x2AD9) && newValue.length() >= 3) {
         const uint8_t responseCode = (uint8_t)newValue.at(0);
         const uint8_t requestCode = (uint8_t)newValue.at(1);
