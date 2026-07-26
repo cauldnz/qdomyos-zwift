@@ -139,7 +139,11 @@ class ftmsbike : public bike {
     QDateTime lastRefreshCharacteristicChanged2ACE = QDateTime::currentDateTime();
     QDateTime lastDomyosResistanceCommand = QDateTime::currentDateTime().addSecs(-60);
     QDateTime domyosResistanceRetryAfter = QDateTime::currentDateTime().addSecs(-60);
-    QDateTime lastSb20ButtonPress; // debounce for the Stages SB20 handlebar shifter buttons
+    QDateTime lastSb20ButtonPress; // last dispatched SB20 shifter action (rate-limits the repeat)
+    QDateTime sb20BurstStart;      // when the current press began, for the hold-to-repeat delay
+    bool sb20BurstArmed = true;    // true = next 0x01 starts a new press; a 0x04/0x08 terminator re-arms
+    static constexpr int SB20_HOLD_DELAY_MS = 450;  // hold this long before auto-repeat kicks in
+    static constexpr int SB20_REPEAT_MS = 200;      // then one action per this interval while held
     bool ftmsFrameReceived = false;
     uint8_t firstStateChanged = 0;
     int8_t bikeResistanceOffset = 4;

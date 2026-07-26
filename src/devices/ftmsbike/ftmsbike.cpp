@@ -729,9 +729,38 @@ void ftmsbike::characteristicChanged(const QLowEnergyCharacteristic &characteris
     // controls); LEFT/RIGHT 3rd = gear down/up (virtual shifting — an inclination offset in sim
     // mode, or a Zwift Play gear command when gears_zwift_ratio is on; a no-op in erg mode).
     if (characteristic.uuid() == QBluetoothUuid(QStringLiteral("0c46be60-9c22-48ff-ae0e-c6eae1a2f4e5"))) {
+        // Trigger on the FIRST frame of a press-burst, not on the 0x03 "commit" frame.
+        // Measured on a real SB20 (session 13, 2026-07-26): the bike emits 0x03 only for SOME
+        // presses. Every burst streams 0x01 while held and ends with a terminator — 0x04 after a
+        // burst that committed, 0x08 after one that did not. Keying on 0x03 silently dropped every
+        // 0x08-terminated press: LEFT-down went 0/2, LEFT-up only 4 of ~12.
+        // So: act on the first 0x01 of a burst, then disarm until a terminator (0x04/0x08) re-arms
+        // us — one action per physical press regardless of which terminator the bike chooses.
+        if (newValue.length() >= 4) {
+            const uint8_t frameType = (uint8_t)newValue.at(0);
+            if (frameType == 0x04 || frameType == 0x08) {  // burst ended — next press starts fresh
+                sb20BurstArmed = true;
+                return;
+            }
+        }
+        // Auto-repeat while held: a tap gives ONE action; holding ramps. The 0x01 frames stream for
+        // as long as the button is down (~10-20/s), so we fire on the first, then — after a short
+        // hold delay — repeat at a steady rate. Without this a 5 W step is unusable: it is below the
+        // perceptual threshold at ride power, so adjusting ERG meaningfully would take a dozen taps.
+        bool fire = false;
         if (settings.value(QZSettings::sb20_buttons_enabled, QZSettings::default_sb20_buttons_enabled).toBool() &&
-            newValue.length() >= 4 && ((uint8_t)newValue.at(0)) == 0x03 && homeform::singleton() &&
-            (!lastSb20ButtonPress.isValid() || lastSb20ButtonPress.msecsTo(now) >= 150)) {
+            newValue.length() >= 4 && ((uint8_t)newValue.at(0)) == 0x01 && homeform::singleton()) {
+            if (sb20BurstArmed) {                     // first frame of a new press -> act at once
+                fire = true;
+                sb20BurstArmed = false;
+                sb20BurstStart = now;
+            } else if (sb20BurstStart.isValid() && sb20BurstStart.msecsTo(now) >= SB20_HOLD_DELAY_MS &&
+                       (!lastSb20ButtonPress.isValid() ||
+                        lastSb20ButtonPress.msecsTo(now) >= SB20_REPEAT_MS)) {
+                fire = true;                          // still held past the delay -> repeat
+            }
+        }
+        if (fire) {
             lastSb20ButtonPress = now;
             uint16_t buttonMask = ((uint8_t)newValue.at(2)) | (((uint16_t)((uint8_t)newValue.at(3))) << 8);
             switch (buttonMask) {
