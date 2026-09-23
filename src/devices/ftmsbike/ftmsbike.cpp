@@ -669,6 +669,25 @@ bool ftmsbike::shouldUseCalculatedResistanceFallback(const QDateTime &now) {
     return calculatedResistanceFallbackSince.msecsTo(now) >= 3000;
 }
 
+ftmsbike::Sb20ButtonAction ftmsbike::decodeSb20Button(const QByteArray &value) {
+    // Stateless one-hot button events on the SB20 vendor char 0c46be60 (capture-derived; see the
+    // SB20-power-proxy project's code/findings/shifter-ble-protocol.md). Only the 0x03 "commit" frame
+    // (03 00 <bit:u16 LE> <bit:u16 LE>) carries an action; the 0x01 held-stream and 0x04/0x08
+    // terminators do not — that's what debounces the ~10-20-frame burst of one press to one action.
+    if (value.length() < 4 || (uint8_t)value.at(0) != 0x03)
+        return Sb20ButtonAction::None;
+    const uint16_t mask = ((uint8_t)value.at(2)) | (((uint16_t)((uint8_t)value.at(3))) << 8);
+    switch (mask) {
+    case 0x0001: return Sb20ButtonAction::TargetPowerUp;     // LEFT up
+    case 0x0002: return Sb20ButtonAction::TargetPowerDown;   // LEFT down
+    case 0x0004: return Sb20ButtonAction::GearDown;          // LEFT 3rd
+    case 0x0008: return Sb20ButtonAction::PelotonOffsetUp;   // RIGHT up
+    case 0x0010: return Sb20ButtonAction::PelotonOffsetDown; // RIGHT down
+    case 0x0020: return Sb20ButtonAction::GearUp;            // RIGHT 3rd
+    default:     return Sb20ButtonAction::None;
+    }
+}
+
 void ftmsbike::characteristicChanged(const QLowEnergyCharacteristic &characteristic, const QByteArray &newValue) {
     if (isWriting && currentWriteWaitingForResponse && sender() == currentWriteService) {
         completeCurrentWrite();
@@ -730,31 +749,33 @@ void ftmsbike::characteristicChanged(const QLowEnergyCharacteristic &characteris
     // mode, or a Zwift Play gear command when gears_zwift_ratio is on; a no-op in erg mode).
     if (characteristic.uuid() == QBluetoothUuid(QStringLiteral("0c46be60-9c22-48ff-ae0e-c6eae1a2f4e5"))) {
         if (settings.value(QZSettings::sb20_buttons_enabled, QZSettings::default_sb20_buttons_enabled).toBool() &&
-            newValue.length() >= 4 && ((uint8_t)newValue.at(0)) == 0x03 && homeform::singleton() &&
+            homeform::singleton() &&
             (!lastSb20ButtonPress.isValid() || lastSb20ButtonPress.msecsTo(now) >= 150)) {
-            lastSb20ButtonPress = now;
-            uint16_t buttonMask = ((uint8_t)newValue.at(2)) | (((uint16_t)((uint8_t)newValue.at(3))) << 8);
-            switch (buttonMask) {
-            case 0x0001: // LEFT up -> target power +
-                homeform::singleton()->keyboardPlus(QStringLiteral("target_power"));
-                break;
-            case 0x0002: // LEFT down -> target power -
-                homeform::singleton()->keyboardMinus(QStringLiteral("target_power"));
-                break;
-            case 0x0008: // RIGHT up -> peloton offset +
-                homeform::singleton()->keyboardPlus(QStringLiteral("peloton_offset"));
-                break;
-            case 0x0010: // RIGHT down -> peloton offset -
-                homeform::singleton()->keyboardMinus(QStringLiteral("peloton_offset"));
-                break;
-            case 0x0004: // LEFT 3rd -> gear down (virtual shifting)
-                gearDown();
-                break;
-            case 0x0020: // RIGHT 3rd -> gear up (virtual shifting)
-                gearUp();
-                break;
-            default:
-                break;
+            const Sb20ButtonAction action = decodeSb20Button(newValue);  // pure, unit-tested (TestSb20Buttons)
+            if (action != Sb20ButtonAction::None) {
+                lastSb20ButtonPress = now;  // debounce on a real press (a mapped 0x03 commit frame)
+                switch (action) {
+                case Sb20ButtonAction::TargetPowerUp:
+                    homeform::singleton()->keyboardPlus(QStringLiteral("target_power"));
+                    break;
+                case Sb20ButtonAction::TargetPowerDown:
+                    homeform::singleton()->keyboardMinus(QStringLiteral("target_power"));
+                    break;
+                case Sb20ButtonAction::PelotonOffsetUp:
+                    homeform::singleton()->keyboardPlus(QStringLiteral("peloton_offset"));
+                    break;
+                case Sb20ButtonAction::PelotonOffsetDown:
+                    homeform::singleton()->keyboardMinus(QStringLiteral("peloton_offset"));
+                    break;
+                case Sb20ButtonAction::GearDown:
+                    gearDown();
+                    break;
+                case Sb20ButtonAction::GearUp:
+                    gearUp();
+                    break;
+                case Sb20ButtonAction::None:
+                    break;
+                }
             }
         }
         return;

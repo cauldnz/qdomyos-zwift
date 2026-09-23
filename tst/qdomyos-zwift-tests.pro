@@ -31,6 +31,7 @@ SOURCES += \
         Devices/TestSchwinn411510EParser.cpp \
         Devices/TestApexBikeParser.cpp \
         Devices/TestKeepBikeParser.cpp \
+        Devices/TestSb20Buttons.cpp \
         main.cpp
 
 # Avoid the "File too big" error building in Windows. This has happened when a template class is used with Google Test / typed tests

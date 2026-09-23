@@ -88,6 +88,15 @@ class ftmsbike : public bike {
     bool ergModeSupportedAvailableBySoftware() override { return !FS_YK; }
     bool inclinationAvailableBySoftware() override { return !resistance_lvl_mode; }
 
+    // Stages SB20 handlebar shifter buttons (#4785). decodeSb20Button() is the PURE map from a raw
+    // 0c46be60 vendor notification to an in-app action, factored out of characteristicChanged so it
+    // is unit-testable (tst/Devices/TestSb20Buttons.cpp). Only the 0x03 "commit" frame carries an
+    // action; the 0x01 held-stream and 0x04/0x08 terminators return None. The bitmask is one-hot per
+    // button (bits 0-5) — capture-derived; see shifter-ble-protocol.md in the SB20-power-proxy project.
+    enum class Sb20ButtonAction { None, TargetPowerUp, TargetPowerDown, PelotonOffsetUp,
+                                  PelotonOffsetDown, GearDown, GearUp };
+    static Sb20ButtonAction decodeSb20Button(const QByteArray &value);
+
   private:
     struct WriteRequest {
         QByteArray data;
